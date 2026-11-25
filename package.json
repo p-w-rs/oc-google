@@ -1,0 +1,62 @@
+{
+  "name": "oc-google",
+  "version": "1.0.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "description": "Google Drive, Docs, Sheets and Slides for OpenCode agents: your own Google OAuth client (Personal mode), Drive v3 and the Docs, Sheets and Slides APIs as the signed-in user, permissions where sharing and deleting ask, and built-in know-how",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/p-w-rs/oc-google"
+  },
+  "homepage": "https://github.com/p-w-rs/oc-google#readme",
+  "bugs": {
+    "url": "https://github.com/p-w-rs/oc-google/issues"
+  },
+  "exports": {
+    ".": "./plugin/index.ts",
+    "./gui-experimental": "./dist/gui-experimental.cjs"
+  },
+  "files": [
+    "plugin/*.ts",
+    "plugin/*.tsx",
+    "!plugin/*.test.ts",
+    "!plugin/test*.ts",
+    "dist/gui-experimental.cjs",
+    "vendor",
+    "scripts/*.mjs",
+    "docs",
+    "README.md",
+    "pixi.toml",
+    "pixi.lock",
+    "npm-shrinkwrap.json",
+    "tsconfig.json",
+    "vite.config.ts",
+    "skill"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "os": [
+    "darwin",
+    "linux"
+  ],
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "node --import tsx --test plugin/*.test.ts scripts/*.test.ts",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "jsonc-parser": "3.3.1",
+    "oc-secure-kit": "file:vendor/oc-secure-kit-1.0.2.tgz"
+  },
+  "devDependencies": {
+    "@opencode/plugin": "2.2.6",
+    "@types/node": "24.10.0",
+    "solid-js": "1.9.18",
+    "tsx": "4.20.6",
+    "typescript": "5.9.3",
+    "vite": "8.3.6",
+    "vite-plugin-solid": "2.11.15"
+  }
+}
