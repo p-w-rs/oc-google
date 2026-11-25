@@ -58,6 +58,13 @@ Google Workspace accounts work too if your administrator allows them to use thei
 | `google_upload` | Files to Drive (any size), new or replacing a file's content; optional conversion to Google formats |
 | `google_account_upsert` / `_remove`, `google_request_secret`, `google_signin`, `google_refresh` | Setup |
 
+**rclone** works without its own login: any `rclone` command in the agent's shell that names the `gdrive:` remote
+(`rclone lsd gdrive:`, `rclone copy ./out gdrive:backup`, also through `pixi exec --spec rclone rclone …`) gets the
+signed-in account as environment variables for that one command (your OAuth client and token; nothing is written to
+disk, secrets are masked in the output). The same permissions apply: reads and uploads run; `rclone delete`, `purge`,
+`cleanup` and `--drive-use-trash=false` count as delete and `rclone link` as share, so they ask. Several accounts:
+`OC_GOOGLE_ACCOUNT=<id> rclone …`. If your own `rclone.conf` defines a `[gdrive]` remote, it is used as it is.
+
 ## Permissions
 
 Per account: **read**, **write** (create, edit, move, copy, upload, trash), **share** (anything that changes who has

@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { classifyRequest, contentTypeOf, defaultEffect, explainApiError, explainSignInError, exportFormat, normalizeAccount, requestedScopes, resolveApi, sortKinds } from "./model.js"
+import { classifyRequest, contentTypeOf, defaultEffect, explainApiError, explainSignInError, exportFormat, normalizeAccount, planRclone, rcloneEnv, requestedScopes, resolveApi, sortKinds } from "./model.js"
 import { withQuery } from "./tools.js"
 
 const CLIENT = "123456789012-abcdefgh12345678.apps.googleusercontent.com"
@@ -98,4 +98,36 @@ test("sign-in and API errors explained in plain words", () => {
   assert.match(explainApiError(403, legacy, "sheets")!, /Google Sheets API is not enabled.*apis\/library\/sheets\.googleapis\.com\?project=7/)
   assert.match(explainApiError(403, { error: { code: 403, message: "Insufficient Permission", errors: [{ reason: "insufficientPermissions" }] } }, "drive")!, /scope/)
   assert.equal(explainApiError(404, { error: { code: 404, message: "File not found" } }, "drive"), undefined)
+})
+
+test("rclone commands: which use gdrive: and what they need", () => {
+  const plan = (command: string) => planRclone(command)
+  assert.deepEqual(plan("ls -la"), { uses: false, kinds: [], login: false })
+  assert.equal(plan("rclone lsd other:").uses, false)
+  assert.equal(plan("rclone copy ./a ./b").uses, false)
+  assert.deepEqual(plan("rclone lsd gdrive:").kinds, ["read"])
+  assert.deepEqual(plan("pixi exec --spec rclone rclone lsjson gdrive:Photos -R").kinds, ["read"])
+  assert.deepEqual(plan("rclone copy gdrive:docs ./local").kinds, ["read"])
+  assert.deepEqual(plan("rclone copy ./local gdrive:backup --progress").kinds, ["write"])
+  assert.deepEqual(plan("rclone sync ./site 'gdrive:My Site'").kinds, ["write"], "sync deletes go to the trash")
+  assert.deepEqual(plan("rclone sync ./site gdrive:site --drive-use-trash=false").kinds, ["delete"])
+  assert.deepEqual(plan("rclone move gdrive:a gdrive:b").kinds, ["write"])
+  assert.deepEqual(plan("rclone delete gdrive:tmp").kinds, ["delete"])
+  assert.deepEqual(plan("rclone purge gdrive:tmp").kinds, ["delete"])
+  assert.deepEqual(plan("rclone cleanup gdrive:").kinds, ["delete"], "empties the trash")
+  assert.deepEqual(plan("rclone link gdrive:report.pdf").kinds, ["share"])
+  assert.deepEqual(plan("rclone mkdir gdrive:new && rclone lsd gdrive:").kinds, ["read", "write"])
+  assert.deepEqual(plan("rclone mount gdrive: ~/gd --daemon").kinds, ["write"])
+  assert.deepEqual(plan("rclone serve http gdrive: --read-only").kinds, ["read"])
+  assert.deepEqual(plan("rclone backend features gdrive:").kinds, ["read"])
+  assert.equal(plan("rclone config reconnect gdrive:").login, true)
+  assert.equal(plan("rclone about gdrive:").login, false)
+})
+
+test("rclone environment", () => {
+  const env = rcloneEnv("gdrive", "id.apps.googleusercontent.com", "s3cret", "ya29.abc", "1//r", 1_800_000_000_000, false)
+  assert.equal(env.RCLONE_CONFIG_GDRIVE_TYPE, "drive")
+  assert.equal(env.RCLONE_CONFIG_GDRIVE_SCOPE, "drive")
+  assert.deepEqual(JSON.parse(env.RCLONE_CONFIG_GDRIVE_TOKEN!), { access_token: "ya29.abc", token_type: "Bearer", refresh_token: "1//r", expiry: new Date(1_800_000_000_000).toISOString() })
+  assert.equal(rcloneEnv("gdrive", "i", "s", "a", undefined, 0, true).RCLONE_CONFIG_GDRIVE_SCOPE, "drive.readonly")
 })

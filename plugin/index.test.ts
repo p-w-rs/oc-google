@@ -1,6 +1,7 @@
 import { after, before, test } from "node:test"
 import assert from "node:assert/strict"
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { spawn } from "node:child_process"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { Plugin } from "@opencode/plugin"
@@ -20,7 +21,7 @@ async function host(reply: "approve" | "reject" = "approve", options: Record<str
   fake.reset()
   const dir = await mkdtemp(join(tmpdir(), "ocg-"))
   dirs.push(dir)
-  const hooks = { evaluate: [] as any[], after: [] as any[] }
+  const hooks = { evaluate: [] as any[], before: [] as any[], after: [] as any[], shell: [] as any[] }
   const transforms: ((editor: any) => void)[] = []
   const tools = new Map<string, Tool>()
   const skills: { id: string; content: string }[] = []
@@ -43,8 +44,9 @@ async function host(reply: "approve" | "reject" = "approve", options: Record<str
     tool: {
       transform: async (callback: any) => { transforms.push(callback); rebuild(); return { dispose: async () => { transforms.splice(transforms.indexOf(callback), 1); rebuild() } } },
       reload: async () => rebuild(),
-      hook: async (_: string, callback: any) => registration(hooks.after, callback),
+      hook: async (name: string, callback: any) => registration(name === "execute.before" ? hooks.before : hooks.after, callback),
     },
+    shell: { hook: async (_: string, callback: any) => registration(hooks.shell, callback) },
     skill: { transform: async (callback: any) => { callback({ add: (skill: any) => skills.push(skill) }); return { dispose: async () => { skills.length = 0 } } } },
     event: { subscribe: () => (async function* () {})() },
     agent: { list: async () => ({ data: [{ id: "build", name: "build", mode: "primary", hidden: false }] }) },
@@ -75,7 +77,25 @@ async function host(reply: "approve" | "reject" = "approve", options: Record<str
     for (let i = 0; i < 100; i++) { const list = await call("google_list", {}); const account = list.accounts.find((a: { id: string }) => a.id === id); if (account.signedInAs || account.signInFailed) return account; await new Promise(r => setTimeout(r, 30)) }
     throw new Error("sign-in did not settle")
   }
-  return { dir, tools, skills, prompts, raw, call, signIn, enterSecret, cleanup, rpc: () => rpc, policy: () => PolicyStore.open(dir), vault: () => Vault.open({ dir, plugin: PLUGIN_ID }), requests: () => SecretRequests.open(dir) }
+  /** Runs a command through the native shell path: execute.before, shell create.before, a real sh, execute.after. */
+  const shell = async (command: string, env: Record<string, string> = {}) => {
+    const c = { sessionID: "s", agent: "build", messageID: "m", id: `c${++n}` }
+    const input = { command, description: "test" }
+    for (const hook of hooks.before) await hook({ tool: "shell", ...c, input })
+    const create = { command, cwd: dir, timeout: 60_000, shell: "/bin/sh", env: {} as Record<string, string | undefined> }
+    for (const hook of hooks.shell) await hook(create)
+    const { exit, output } = await new Promise<{ exit: number; output: string }>((resolve, reject) => {
+      const child = spawn("/bin/sh", ["-c", command], { cwd: dir, env: { ...process.env, ...env, ...create.env } as NodeJS.ProcessEnv, stdio: ["ignore", "pipe", "pipe"] })
+      let output = ""
+      child.stdout.on("data", chunk => { output += chunk }); child.stderr.on("data", chunk => { output += chunk })
+      child.on("error", reject)
+      child.on("close", code => resolve({ exit: code ?? -1, output }))
+    })
+    const event: any = { tool: "shell", id: c.id, input, status: "completed", result: { output: { exit, truncated: false, output, status: "completed" }, content: [{ type: "text", text: output }], metadata: { exit } } }
+    for (const hook of hooks.after) await hook(event)
+    return { exit, text: event.result.content[0].text as string, env: create.env }
+  }
+  return { dir, tools, skills, prompts, raw, call, shell, signIn, enterSecret, cleanup, rpc: () => rpc, policy: () => PolicyStore.open(dir), vault: () => Vault.open({ dir, plugin: PLUGIN_ID }), requests: () => SecretRequests.open(dir) }
 }
 
 test("identity, tools, skill, and safe failure", async () => {
@@ -321,4 +341,46 @@ test("GUI admin: create with secret, export and import keep the sign-in, dismiss
   await assert.rejects(other.call("google_api", { api: "drive", method: "POST", path: "files/f-doc/permissions", body: { type: "anyone", role: "reader" } }), /Denied by the oc-google permissions table \(share on home\)/)
   await other.rpc().signOut({ id: "home" })
   assert.equal((await other.rpc().state({})).accounts[0].signedIn, false)
+})
+
+test("rclone: the gdrive: remote gets the signed-in account (env only, masked); deletes and links ask; other commands untouched", async () => {
+  const h = await host("reject")
+  await h.signIn()
+  const home = join(h.dir, "home")
+  await mkdir(home, { recursive: true })
+  const env = { HOME: home }
+  const conf = join(home, "rclone.conf")
+  const previous = process.env.RCLONE_CONFIG
+  process.env.RCLONE_CONFIG = conf
+  after(() => { if (previous === undefined) delete process.env.RCLONE_CONFIG; else process.env.RCLONE_CONFIG = previous })
+  const listed = await h.shell('rclone lsd gdrive: 2>/dev/null; echo "type=$RCLONE_CONFIG_GDRIVE_TYPE id=$RCLONE_CONFIG_GDRIVE_CLIENT_ID"; echo "$RCLONE_CONFIG_GDRIVE_TOKEN"; echo "$RCLONE_CONFIG_GDRIVE_CLIENT_SECRET"', env)
+  assert.equal(listed.env.RCLONE_CONFIG_GDRIVE_TYPE, "drive")
+  assert.equal(listed.env.RCLONE_CONFIG_GDRIVE_SCOPE, "drive")
+  const token = JSON.parse(listed.env.RCLONE_CONFIG_GDRIVE_TOKEN!)
+  assert.match(token.access_token, /^ya29\./)
+  assert.match(token.refresh_token, /^1\/\//)
+  assert.ok(Date.parse(token.expiry) > Date.now())
+  assert.match(listed.text, new RegExp(`type=drive id=${CLIENT_ID.replace(/\./g, "\\.")}`))
+  assert.ok(!listed.text.includes(token.access_token) && !listed.text.includes(token.refresh_token) && !listed.text.includes(CLIENT_SECRET), "tokens and the client secret are masked in the output")
+  assert.equal(h.prompts.length, 0, "reads and uploads do not ask")
+  assert.equal((await h.shell("pixi exec --spec rclone rclone copy ./a gdrive:backup 2>/dev/null; true", env)).env.RCLONE_CONFIG_GDRIVE_TYPE, "drive")
+  assert.equal(h.prompts.length, 0)
+
+  assert.equal((await h.shell("ls; rclone lsd other: 2>/dev/null; true", env)).env.RCLONE_CONFIG_GDRIVE_TYPE, undefined, "commands without gdrive: are untouched")
+
+  const purge = await h.shell("rclone purge gdrive:old 2>/dev/null; true", env)
+  assert.equal(h.prompts.length, 1, "a permanent delete asks")
+  assert.equal(purge.env.RCLONE_CONFIG_GDRIVE_TYPE, undefined, "rejected: nothing supplied")
+  assert.match(purge.text, /delete on personal: not granted/)
+  await h.shell("rclone link gdrive:report.pdf 2>/dev/null; true", env)
+  assert.equal(h.prompts.length, 2, "a public link asks (share)")
+
+  const login = await h.shell("rclone config reconnect gdrive: 2>/dev/null; true", env)
+  assert.match(login.text, /No rclone login is needed/)
+
+  await writeFile(conf, "[gdrive]\ntype = drive\n")
+  const own = await h.shell("rclone lsd gdrive: 2>/dev/null; true", env)
+  assert.equal(own.env.RCLONE_CONFIG_GDRIVE_TYPE, undefined, "the user's own [gdrive] remote wins")
+  assert.match(own.text, /defines \[gdrive\]/)
+  await h.cleanup()
 })

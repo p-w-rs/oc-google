@@ -3,10 +3,10 @@ import { mkdir, open, readFile, stat } from "node:fs/promises"
 import { basename, dirname, join } from "node:path"
 import { Readable } from "node:stream"
 import { pipeline } from "node:stream/promises"
-import { PolicyStore, Redactor, SecretRequests, Serial, Vault, type PermissionBridge } from "oc-secure-kit"
+import { PolicyStore, Redactor, SecretRequests, Serial, Vault, type PermissionBridge, type ShellCaller, type Supply } from "oc-secure-kit"
 import {
   ACCESS, APIS, CLIENT_SECRET, contentTypeOf, DEFAULT_AUTH_URL, DEFAULT_REVOKE_URL, DEFAULT_TOKEN_URL, explainApiError, explainSignInError, exportFormat,
-  REFRESH, requestedScopes, SECRET_NAMES, TOKEN_META, TOKEN_NAMES, type Account, type Api, type Discovery, type Target,
+  GOOGLE_SECRET_PATTERNS, planRclone, RCLONE_REMOTE, rcloneEnv, REFRESH, requestedScopes, SECRET_NAMES, TOKEN_META, TOKEN_NAMES, type Account, type Api, type Discovery, type Target,
 } from "./model.js"
 import { refreshGrant, revoke, SignInError, startBrowser, type Endpoint, type Grant, type PendingSignIn } from "./oauth.js"
 import { AccountStore } from "./store.js"
@@ -356,6 +356,50 @@ export class GoogleService {
     await this.policy.removeEntity(account.id)
     await this.requests.remove({ entity: account.id })
     await this.refreshRedactor()
+  }
+
+  /** The user's own rclone config, if it defines a remote with our name (then we leave rclone alone). */
+  async #userDefinesRemote(remote: string, env: NodeJS.ProcessEnv): Promise<string | undefined> {
+    const home = env.HOME ?? ""
+    const candidates = env.RCLONE_CONFIG ? [env.RCLONE_CONFIG] : [join(env.XDG_CONFIG_HOME || join(home, ".config"), "rclone", "rclone.conf"), join(home, ".rclone.conf")]
+    for (const file of candidates) {
+      try { if (new RegExp(`^\\s*\\[${remote.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\]\\s*$`, "m").test(await readFile(file, "utf8"))) return file } catch {}
+    }
+    return undefined
+  }
+
+  /**
+   * Supplies the `gdrive:` rclone remote (the signed-in account's OAuth client and token, only in that command's
+   * environment, nothing on disk) to rclone commands that use it, after a permission check. Other commands are untouched.
+   */
+  async prepareCommand(command: string, caller: ShellCaller, env: NodeJS.ProcessEnv = process.env): Promise<Supply | undefined> {
+    const plan = planRclone(command)
+    if (!plan.uses) return undefined
+    const notes: string[] = []
+    const ran = "The command ran without the plugin's Google sign-in."
+    const conflict = await this.#userDefinesRemote(RCLONE_REMOTE, env)
+    if (conflict) return { env: {}, notes: [`Your own rclone config (${conflict}) defines [${RCLONE_REMOTE}], so it is used as it is. To use the plugin's sign-in instead, rename that remote.`], secrets: false }
+    if (plan.login) notes.push(`No rclone login is needed for ${RCLONE_REMOTE}: the plugin supplies the signed-in Google account to every rclone command (rclone config reconnect/create would open a browser).`)
+    let account: Account
+    try { account = await this.pick(/(?:^|\s)OC_GOOGLE_ACCOUNT=([A-Za-z0-9._@-]+)/.exec(command)?.[1]) }
+    catch (error) { return { env: {}, notes: [...notes, `${(error as Error).message} ${ran}`], secrets: false } }
+    if (!(await this.signedIn(account))) return { env: {}, notes: [...notes, `${account.id} is not signed in: google_signin account=${account.id}. ${ran}`], secrets: false }
+    const metadata = { command: command.length > 300 ? `${command.slice(0, 300)}…` : command, account: account.email ?? account.id }
+    for (const capability of plan.kinds) {
+      try { await this.bridge.check({ sessionID: caller.sessionID, ...(caller.agent && { agent: caller.agent }), ...(caller.source && { source: caller.source }), capability, entities: [account.id], metadata }) }
+      catch (error) { return { env: {}, notes: [...notes, `${capability} on ${account.id}: not granted (${(error as Error).message.split("\n")[0]}). ${ran}`], secrets: false } }
+    }
+    try {
+      const accessToken = await this.accessToken(account)
+      const meta = await this.vault.get(account.id, TOKEN_META)
+      const expiresAt = meta ? (JSON.parse(meta) as { expiresAt?: number }).expiresAt ?? Date.now() + 30 * 60_000 : Date.now() + 30 * 60_000
+      const { clientSecret } = await this.endpoint(account)
+      const readOnly = !requestedScopes(account).includes("https://www.googleapis.com/auth/drive")
+      const supplied = rcloneEnv(RCLONE_REMOTE, account.clientId!, clientSecret, accessToken, await this.vault.get(account.id, REFRESH), expiresAt, readOnly)
+      return { env: supplied, notes, secrets: true, mask: GOOGLE_SECRET_PATTERNS }
+    } catch (error) {
+      return { env: {}, notes: [...notes, `${(error as Error).message} ${ran}`], secrets: false }
+    }
   }
 
   async syncRedactor(): Promise<void> {

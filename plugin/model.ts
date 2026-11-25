@@ -305,3 +305,91 @@ const LOCAL_TYPES: Record<string, string> = {
 export function contentTypeOf(name: string): string {
   return LOCAL_TYPES[/\.([^./]+)$/.exec(name.toLowerCase())?.[1] ?? ""] ?? "application/octet-stream"
 }
+
+// ------------------------------------------------------------------ rclone in the shell
+
+/** The rclone remote this plugin defines (through environment variables, nothing on disk). */
+export const RCLONE_REMOTE = "gdrive"
+
+export interface RclonePlan {
+  /** Whether the command uses the `gdrive:` remote with rclone. */
+  readonly uses: boolean
+  /** Permissions needed, strongest last. */
+  readonly kinds: readonly Kind[]
+  /** Runs rclone's own interactive setup/login for the remote (which would open a browser and store a token). */
+  readonly login: boolean
+}
+
+const segments = (command: string) => command.split(/\|\||&&|[|;\n]/).map(part => part.trim()).filter(Boolean)
+const words = (segment: string) => [...segment.replace(/^(\w+=\S*\s+)+/, "").matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g)].map(m => m[1] ?? m[2] ?? m[3]!)
+const unquote = (word: string) => word.replace(/^['"]|['"]$/g, "")
+const READ_SUBCOMMANDS = new Set(["ls", "lsd", "lsl", "lsf", "lsjson", "tree", "cat", "size", "about", "check", "cryptcheck", "checksum", "hashsum", "md5sum", "sha1sum", "ncdu", "listremotes", "version", "help", "config", "obscure", "test", "gitannex"])
+const TRANSFER_SUBCOMMANDS = new Set(["copy", "copyto", "sync", "move", "moveto", "bisync", "check", "cryptcheck"])
+const DELETE_SUBCOMMANDS = new Set(["delete", "deletefile", "purge", "rmdirs", "cleanup"])
+
+/** Where `rclone` starts in a segment's words: run directly, by path, or through a launcher (pixi exec --spec rclone rclone …). */
+function rcloneAt(argv: readonly string[]): number {
+  for (let i = 0; i < argv.length; i++) {
+    if ((argv[i]!.split("/").pop() ?? "") !== "rclone") continue
+    if (i > 0 && /^(--spec|-s|--with|-w|--package|-p)$/.test(argv[i - 1]!)) continue
+    return i
+  }
+  return -1
+}
+
+/**
+ * Which rclone commands get the `gdrive:` remote and which permissions they need. Commands that don't name
+ * `gdrive:` are left exactly as they are. Deletes in Drive go to the trash by default (write); deletes that skip
+ * the trash (`--drive-use-trash=false`), emptying the trash (`cleanup`) and the bulk delete commands count as
+ * delete; `rclone link` creates a public link (share).
+ */
+export function planRclone(command: string, remote = RCLONE_REMOTE): RclonePlan {
+  const needed = new Set<Kind>()
+  let login = false
+  const ours = (arg: string) => unquote(arg).startsWith(`${remote}:`)
+  const noTrash = /--drive-use-trash(=|\s+)(false|0)\b|RCLONE_DRIVE_USE_TRASH=(false|0)\b/i.test(command)
+  for (const segment of segments(command)) {
+    const argv = words(segment)
+    const at = rcloneAt(argv)
+    if (at < 0) continue
+    const args = argv.slice(at + 1)
+    const positional = args.filter(arg => !arg.startsWith("-"))
+    const sub = positional[0] ?? ""
+    const targets = positional.slice(1)
+    const mentions = targets.some(ours) || (sub === "config" && targets.some(arg => unquote(arg).replace(/:$/, "") === remote))
+    if (!mentions) continue
+    if (sub === "config" || sub === "authorize") { login = /^(reconnect|create|update|edit|userinfo)$/.test(targets[0] ?? "") || sub === "authorize"; needed.add("read"); continue }
+    if (sub === "link") { needed.add("share"); continue }
+    if (DELETE_SUBCOMMANDS.has(sub)) { needed.add("delete"); continue }
+    if (TRANSFER_SUBCOMMANDS.has(sub)) {
+      const destination = targets[targets.length - 1] ?? ""
+      const source = targets.slice(0, -1)
+      if (ours(destination) && !["check", "cryptcheck"].includes(sub)) needed.add(noTrash && /^(sync|move|moveto|bisync)$/.test(sub) ? "delete" : "write")
+      if (source.some(ours)) needed.add(/^(move|moveto|bisync)$/.test(sub) ? (noTrash ? "delete" : "write") : "read")
+      if (!needed.size) needed.add("read")
+      continue
+    }
+    if (READ_SUBCOMMANDS.has(sub)) { needed.add("read"); continue }
+    if (sub === "serve") { needed.add(/--read-only\b/.test(segment) || /^(dlna|docker)$/.test(targets[0] ?? "") ? "read" : "write"); continue }
+    if (sub === "backend") { needed.add(/^(features|help)$/.test(targets[0] ?? "") ? "read" : "write"); continue }
+    if (sub === "rmdir" && noTrash) { needed.add("delete"); continue }
+    // mount, nfsmount, mkdir, touch, rcat, copyurl, dedupe, settier, rmdir, rc, … change things.
+    needed.add(sub === "dedupe" && noTrash ? "delete" : "write")
+  }
+  return { uses: needed.size > 0, kinds: sortKinds(needed), login }
+}
+
+/** rclone's environment for the remote: type drive, the user's OAuth client and the current token. */
+export function rcloneEnv(remote: string, clientId: string, clientSecret: string, accessToken: string, refreshToken: string | undefined, expiresAt: number, readOnly: boolean): Record<string, string> {
+  const prefix = `RCLONE_CONFIG_${remote.toUpperCase().replace(/[^A-Z0-9]/g, "_")}`
+  return {
+    [`${prefix}_TYPE`]: "drive",
+    [`${prefix}_CLIENT_ID`]: clientId,
+    [`${prefix}_CLIENT_SECRET`]: clientSecret,
+    [`${prefix}_SCOPE`]: readOnly ? "drive.readonly" : "drive",
+    [`${prefix}_TOKEN`]: JSON.stringify({ access_token: accessToken, token_type: "Bearer", ...(refreshToken && { refresh_token: refreshToken }), expiry: new Date(expiresAt).toISOString() }),
+  }
+}
+
+/** Google tokens and client secrets as rclone may print them (e.g. `rclone config show` or -vv). */
+export const GOOGLE_SECRET_PATTERNS: readonly RegExp[] = [/ya29\.[A-Za-z0-9_\-.]{20,}/g, /1\/\/[A-Za-z0-9_\-]{20,}/g, /GOCSPX-[A-Za-z0-9_\-]{10,}/g]

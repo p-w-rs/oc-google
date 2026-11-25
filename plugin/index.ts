@@ -1,7 +1,7 @@
 import type { Plugin } from "@opencode/plugin"
 import { readFile } from "node:fs/promises"
 import { fileURLToPath } from "node:url"
-import { installRedaction, PermissionBridge, pluginDataDir, SECURE_KIT_VERSION, sessionRoots, type PermissionHost } from "oc-secure-kit"
+import { installRedaction, PermissionBridge, pluginDataDir, SECURE_KIT_VERSION, sessionRoots, ShellSupplier, type PermissionHost } from "oc-secure-kit"
 import { createAdmin } from "./admin.js"
 import { defaultEffect } from "./model.js"
 import { GoogleRpc } from "./rpc.js"
@@ -66,6 +66,17 @@ export function createPlugin(): Plugin.Plugin {
           }
         }))
         registrations.push(await installRedaction(ctx.tool as never, service.redactor, new Set<string>(TOOL_NAMES), error => warn("redaction skipped", error)))
+
+        // rclone commands that use the gdrive: remote get the signed-in account; nothing else is touched.
+        const shell = new ShellSupplier({
+          plugin: PLUGIN_ID, redactor: service.redactor, warn,
+          prepare: (command, caller) => service.prepareCommand(command, caller),
+          annotate: command => /\brclone\b[^\n]*\b(config\s+(create|reconnect)|authorize)\b/.test(command) ? "No rclone login is needed for Google Drive: use the gdrive: remote, which the oc-google plugin supplies with the signed-in account." : undefined,
+        })
+        registrations.push({ dispose: () => shell.dispose() })
+        registrations.push(await ctx.tool.hook("execute.before", event => shell.before(event)))
+        registrations.push(await ctx.shell.hook("create.before", event => shell.create(event)))
+        registrations.push(await ctx.tool.hook("execute.after", event => shell.after(event as never)))
 
         try {
           const content = await readFile(SKILL, "utf8")

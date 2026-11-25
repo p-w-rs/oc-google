@@ -19,6 +19,12 @@ description: Work effectively in Google Drive, Docs, Sheets and Slides through t
   (same ID, sharing and history). `convert: document|spreadsheet|presentation` imports Word/Markdown/HTML/text,
   Excel/CSV, PowerPoint as native Google files. Any size (resumable above 5 MB).
 - `google_list` — accounts, who is signed in, granted scopes, what you may do. Setup: see the end.
+- **rclone** in the shell: the `gdrive:` remote is supplied with the signed-in account to every rclone command that
+  names it — never run `rclone config`/`authorize` (that opens a browser). Not installed? `pixi exec --spec rclone
+  rclone …`. Good for bulk or recursive transfers and syncing folders: `rclone copy ./out gdrive:Backups/out -P`,
+  `rclone lsf gdrive:Folder`, `rclone size gdrive:`. Google Docs/Sheets/Slides download as docx/xlsx/pptx
+  (`--drive-export-formats md,csv,pdf` to change). Deletes go to the Drive trash; `delete`, `purge`, `cleanup`,
+  `--drive-use-trash=false` and `link` ask the user. Another account: `OC_GOOGLE_ACCOUNT=<id> rclone …`.
 
 Permissions (defaults): reading, creating, editing, moving, copying, uploading and **trashing** run; **anything that
 changes who has access** (permissions create/update/delete, link sharing, ownership transfer, access requests) and

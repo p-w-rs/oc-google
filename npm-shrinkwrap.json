@@ -1,12 +1,12 @@
 {
   "name": "oc-google",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "lockfileVersion": 3,
   "requires": true,
   "packages": {
     "": {
       "name": "oc-google",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "license": "UNLICENSED",
       "os": [
         "darwin",
@@ -14,7 +14,7 @@
       ],
       "dependencies": {
         "jsonc-parser": "3.3.1",
-        "oc-secure-kit": "file:vendor/oc-secure-kit-1.0.2.tgz"
+        "oc-secure-kit": "file:vendor/oc-secure-kit-1.1.0.tgz"
       },
       "devDependencies": {
         "@opencode/plugin": "2.2.6",
@@ -4250,9 +4250,9 @@
       }
     },
     "node_modules/oc-secure-kit": {
-      "version": "1.0.2",
-      "resolved": "file:vendor/oc-secure-kit-1.0.2.tgz",
-      "integrity": "sha512-k4sXPtDW6Xqwl1zVth456RwMoty7P2UunNpSH6JZO5/xHBbvDyje2jiHpbvS6fUNZhHCfb5V1JVkf/4l26NXlQ==",
+      "version": "1.1.0",
+      "resolved": "file:vendor/oc-secure-kit-1.1.0.tgz",
+      "integrity": "sha512-RdtGdsbsRyFRFFvMkyXcWtdaOJqLKZYQIu1vjc+8xUXZxMN6CEsKGG/mCGVmAMlykQFWeondhQFTk74be4Efog==",
       "license": "UNLICENSED",
       "engines": {
         "node": ">=24"
