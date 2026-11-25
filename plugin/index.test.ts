@@ -122,7 +122,7 @@ test("setup: client ID, secret requested and entered outside the chat, browser s
   assert.equal(query.get("code_challenge_method"), "S256")
   assert.equal(query.get("access_type"), "offline")
   assert.equal(query.get("prompt"), "consent")
-  assert.equal(query.get("include_granted_scopes"), "true")
+  assert.equal(query.get("include_granted_scopes"), null)
   assert.equal(query.get("login_hint"), "pat@example.com")
   assert.match(query.get("redirect_uri")!, /^http:\/\/127\.0\.0\.1:\d+$/)
   assert.match(query.get("scope")!, /auth\/drive .*auth\/documents/)

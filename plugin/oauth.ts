@@ -78,7 +78,7 @@ export async function startBrowser(endpoint: Endpoint, scopes: readonly string[]
   for (const [key, value] of Object.entries({
     client_id: endpoint.clientId, response_type: "code", redirect_uri: redirect, scope: scopes.join(" "), state,
     code_challenge: b64(createHash("sha256").update(verifier).digest()), code_challenge_method: "S256",
-    access_type: "offline", prompt: "consent", include_granted_scopes: "true",
+    access_type: "offline", prompt: "consent",
     ...(options.loginHint && { login_hint: options.loginHint }),
   })) url.searchParams.set(key, value)
   const timeoutMs = options.timeoutMs ?? 15 * 60_000
