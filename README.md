@@ -4,7 +4,7 @@ Google Drive, Docs, Sheets and Slides for OpenCode agents: find, read, export, u
 edit Google Docs, Sheets and Slides natively, as the signed-in user, through your **own** Google OAuth client.
 Changing who has access (sharing, ownership) and permanent deletes ask first by default, and the built-in `google`
 skill teaches agents the Drive query syntax, `fields` masks, exports, and how to edit Docs safely.
-macOS and Linux; OpenCode 2.2.6+ and Pixi.
+macOS and Linux; the current OpenCode (2.4.2) and Pixi.
 
 ## Setup: your own OAuth client (once, about 3 minutes)
 
@@ -74,7 +74,7 @@ method and path. Defaults: read and write run; share, delete and removing an acc
 
 ## Install
 
-Requires [OpenCode](https://opencode.ai) 2.2.6+ (CLI or Desktop) and [Pixi](https://pixi.sh); macOS or Linux.
+Requires the current [OpenCode](https://opencode.ai) (2.4.2; CLI or Desktop) and [Pixi](https://pixi.sh); macOS or Linux.
 
 ```sh
 git clone https://github.com/p-w-rs/oc-google.git && cd oc-google
@@ -97,5 +97,5 @@ Updating: `git pull && pixi run --locked install`. Accounts, secrets, sign-ins a
 
 ```sh
 pixi run --locked test            # fake Google OAuth + Drive/Docs/Sheets/Slides
-pixi run --locked smoke-host      # real OpenCode 2.2.6 CLI, scripted model, fake Google
+pixi run --locked smoke-host      # real OpenCode CLI (pinned in the script), scripted model, fake Google
 ```

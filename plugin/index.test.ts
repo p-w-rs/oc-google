@@ -91,7 +91,7 @@ async function host(reply: "approve" | "reject" = "approve", options: Record<str
       child.on("error", reject)
       child.on("close", code => resolve({ exit: code ?? -1, output }))
     })
-    const event: any = { tool: "shell", id: c.id, input, status: "completed", result: { output: { exit, truncated: false, output, status: "completed" }, content: [{ type: "text", text: output }], metadata: { exit } } }
+    const event: any = { tool: "shell", id: c.id, input, status: "completed", result: { output: { exitCode: exit, wallTimeSeconds: 0.01, output }, content: [{ type: "text", text: output }], metadata: { status: "completed", truncated: false, exit } } }
     for (const hook of hooks.after) await hook(event)
     return { exit, text: event.result.content[0].text as string, env: create.env }
   }
