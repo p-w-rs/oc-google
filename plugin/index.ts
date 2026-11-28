@@ -1,7 +1,7 @@
 import type { Plugin } from "@opencode/plugin"
 import { readFile } from "node:fs/promises"
 import { fileURLToPath } from "node:url"
-import { installRedaction, PermissionBridge, pluginDataDir, SECURE_KIT_VERSION, sessionRoots, ShellSupplier, type PermissionHost } from "oc-secure-kit"
+import { installRedaction, PermissionBridge, pluginDataDir, SECURE_KIT_VERSION, sessionRoots, maskModelRequests, ShellSupplier, watchShells, type PermissionHost } from "oc-secure-kit"
 import { createAdmin } from "./admin.js"
 import { defaultEffect } from "./model.js"
 import { GoogleRpc } from "./rpc.js"
@@ -77,6 +77,10 @@ export function createPlugin(): Plugin.Plugin {
         registrations.push(await ctx.tool.hook("execute.before", event => shell.before(event)))
         registrations.push(await ctx.shell.hook("create.before", event => shell.create(event)))
         registrations.push(await ctx.tool.hook("execute.after", event => shell.after(event as never)))
+        // Commands moved to the background keep their files until they exit.
+        registrations.push(watchShells(ctx.event as never, shell, warn))
+        // Their output comes back to the model as a message, which no tool hook sees: mask secrets there too.
+        registrations.push(await maskModelRequests(ctx.session as never, shell, warn))
 
         try {
           const content = await readFile(SKILL, "utf8")

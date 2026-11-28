@@ -1,6 +1,6 @@
 [workspace]
 name = "oc-google"
-version = "1.0.0"
+version = "1.1.1"
 description = "Google Drive, Docs, Sheets and Slides for OpenCode agents"
 channels = ["conda-forge"]
 platforms = ["osx-arm64", "osx-64", "linux-64", "linux-aarch64"]

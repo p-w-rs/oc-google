@@ -31,7 +31,7 @@ async function host(reply: "approve" | "reject" = "approve", options: Record<str
   const rebuild = () => { tools.clear(); for (const transform of transforms) transform({ add: (tool: Tool) => tools.set(tool.name, tool) }) }
   const ctx = {
     options: { dataDirectory: dir, authUrl: fake.authUrl, tokenUrl: fake.tokenUrl, revokeUrl: fake.revokeUrl, apiBase: fake.apiBase, ...options },
-    session: { get: async () => ({ parentID: undefined, location: { directory: dir } }) },
+    session: { get: async () => ({ parentID: undefined, location: { directory: dir } }), hook: async () => ({ dispose: async () => {} }) },
     permission: {
       hook: async (_: string, callback: any) => registration(hooks.evaluate, callback),
       assert: async (input: any) => {
